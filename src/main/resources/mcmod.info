@@ -1,0 +1,10 @@
+[
+  {
+    "modid": "recorder",
+    "name": "Recorder",
+    "description": "Records raw server packets for later analysis and replays them",
+    "version": "${version}",
+    "mcversion": "${mcversion}",
+    "authorList": ["toshimichi"]
+  }
+]

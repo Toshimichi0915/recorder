@@ -1,0 +1,18 @@
+{
+  "compatibilityLevel": "JAVA_8",
+  "minVersion": "0.7",
+  "package": "net.toshimichi.recorder.mixin",
+  "refmap": "mixins.recorder.refmap.json",
+  "client": [
+    "AccessorChunkProviderClient",
+    "AccessorGuiPlayerTabOverlay",
+    "AccessorMapStorage",
+    "AccessorS38PacketPlayerListItem",
+    "InvokerEntityTrackerEntry",
+    "MixinGuiIngameMenu",
+    "MixinGuiMainMenu",
+    "MixinMessageDeserializer",
+    "MixinMessageSerializer",
+    "MixinNetworkManager"
+  ]
+}
