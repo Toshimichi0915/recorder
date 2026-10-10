@@ -24,6 +24,7 @@ public class RecordingsScreen extends GuiScreen implements GuiYesNoCallback {
     private static final int REPLAY = 0;
     private static final int DELETE = 1;
     private static final int DONE = 2;
+    private static final int CONVERT = 3;
 
     private final GuiScreen parent;
     private List<File> files = new ArrayList<>();
@@ -31,6 +32,7 @@ public class RecordingsScreen extends GuiScreen implements GuiYesNoCallback {
     private RecordingList list;
     private GuiButton replayButton;
     private GuiButton deleteButton;
+    private GuiButton convertButton;
     private String status = "";
 
     public RecordingsScreen(GuiScreen parent) {
@@ -41,8 +43,9 @@ public class RecordingsScreen extends GuiScreen implements GuiYesNoCallback {
     public void initGui() {
         refresh();
         list = new RecordingList();
-        buttonList.add(replayButton = new GuiButton(REPLAY, width / 2 - 154, height - 52, 152, 20, "Replay"));
-        buttonList.add(deleteButton = new GuiButton(DELETE, width / 2 + 2, height - 52, 152, 20, "Delete"));
+        buttonList.add(replayButton = new GuiButton(REPLAY, width / 2 - 154, height - 52, 100, 20, "Replay"));
+        buttonList.add(convertButton = new GuiButton(CONVERT, width / 2 - 50, height - 52, 100, 20, "Convert to World"));
+        buttonList.add(deleteButton = new GuiButton(DELETE, width / 2 + 54, height - 52, 100, 20, "Delete"));
         buttonList.add(new GuiButton(DONE, width / 2 - 100, height - 28, 200, 20, "Done"));
     }
 
@@ -56,7 +59,7 @@ public class RecordingsScreen extends GuiScreen implements GuiYesNoCallback {
 
     @Override
     public void updateScreen() {
-        replayButton.enabled = deleteButton.enabled = selected >= 0;
+        replayButton.enabled = convertButton.enabled = deleteButton.enabled = selected >= 0;
     }
 
     @Override
@@ -64,6 +67,9 @@ public class RecordingsScreen extends GuiScreen implements GuiYesNoCallback {
         switch (button.id) {
             case REPLAY:
                 replay();
+                break;
+            case CONVERT:
+                convert();
                 break;
             case DELETE:
                 mc.displayGuiScreen(new GuiYesNo(this, "Delete this recording?", files.get(selected).getName(), DELETE));
@@ -87,6 +93,16 @@ public class RecordingsScreen extends GuiScreen implements GuiYesNoCallback {
             Replay.start(file, this);
         } catch (IOException e) {
             log.error("Failed to open {}", file, e);
+            status = EnumChatFormatting.RED + e.getMessage();
+        }
+    }
+
+    private void convert() {
+        File file = files.get(selected);
+        try {
+            status = "Saved as world " + Replay.convert(file, this);
+        } catch (IOException e) {
+            log.error("Failed to convert {}", file, e);
             status = EnumChatFormatting.RED + e.getMessage();
         }
     }

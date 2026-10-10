@@ -8,6 +8,7 @@
     "AccessorGuiPlayerTabOverlay",
     "AccessorMapStorage",
     "AccessorS38PacketPlayerListItem",
+    "InvokerAnvilChunkLoader",
     "InvokerEntityTrackerEntry",
     "MixinGuiIngameMenu",
     "MixinGuiMainMenu",

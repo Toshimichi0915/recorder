@@ -79,6 +79,7 @@ public final class Replay {
     private boolean paused;
     private long base;       // replay millis at the last resume or jump
     private long resumedAt;  // wall clock at the last resume or jump
+    private WorldExport export; // only while converting
 
     private Replay(GuiScreen parent, RecordingFile.Contents contents) {
         this.parent = parent;
@@ -96,6 +97,22 @@ public final class Replay {
         current.connect();
         current.resumedAt = System.currentTimeMillis();
         current.tick();
+    }
+
+    // the whole recording in one go, nothing drawn in between; returns the new save's folder name
+    public static String convert(File file, GuiScreen parent) throws IOException {
+        Replay replay = new Replay(parent, RecordingFile.readAll(file));
+        replay.export = new WorldExport(file.getName().replaceFirst("\\.mcrc$", ""));
+        replay.connect();
+        try {
+            while (replay.index < replay.entries.size()) replay.feed(replay.entries.get(replay.index++));
+            if (replay.mc.theWorld != null) replay.export.saveAll(replay.mc.theWorld);
+        } finally {
+            replay.export.finish(replay.puppet != null ? replay.puppet : replay.mc.thePlayer);
+            replay.mc.loadWorld((WorldClient) null);
+            replay.mc.displayGuiScreen(parent);
+        }
+        return replay.export.directory;
     }
 
     public boolean isPaused() {
@@ -229,6 +246,7 @@ public final class Replay {
             }
 
             if (!serverbound) {
+                if (export != null) export.before(packet, mc.theWorld);
                 // a new world and a new player: like the snapshot, its S08 must reach the handler to close GuiDownloadTerrain
                 if (packet instanceof S01PacketJoinGame || packet instanceof S07PacketRespawn) {
                     puppet = null;
