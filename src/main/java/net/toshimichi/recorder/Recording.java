@@ -37,6 +37,7 @@ import net.minecraft.network.play.server.S0FPacketSpawnMob;
 import net.minecraft.network.play.server.S10PacketSpawnPainting;
 import net.minecraft.network.play.server.S11PacketSpawnExperienceOrb;
 import net.minecraft.network.play.server.S12PacketEntityVelocity;
+import net.minecraft.network.play.server.S18PacketEntityTeleport;
 import net.minecraft.network.play.server.S19PacketEntityHeadLook;
 import net.minecraft.network.play.server.S1BPacketEntityAttach;
 import net.minecraft.network.play.server.S20PacketEntityProperties;
@@ -320,12 +321,14 @@ public final class Recording {
             if (entity instanceof EntityOtherPlayerMP) {
                 EntityPlayer other = (EntityPlayer) entity;
                 packets.add(new S0CPacketSpawnPlayer(other));
+                packets.add(serverPosition(other));
                 // S0F carries the head yaw, S0C does not: without this the head faces south until it turns
                 packets.add(new S19PacketEntityHeadLook(other, (byte) MathHelper.floor_float(other.getRotationYawHead() * 256 / 360)));
                 equipment(other, packets);
                 if (other.isPlayerSleeping()) packets.add(new S0APacketUseBed(other, new BlockPos(other)));
             } else if (entity instanceof EntityLivingBase && entity != player && EntityList.getEntityID(entity) != 0) {
                 packets.add(new S0FPacketSpawnMob((EntityLivingBase) entity));
+                packets.add(serverPosition(entity));
                 equipment((EntityLivingBase) entity, packets);
             } else if (!(entity instanceof EntityLivingBase) && !entity.isDead) {
                 Packet<?> spawn;
@@ -337,6 +340,7 @@ public final class Recording {
                 // modded entities come back as FML packets, which have no PLAY id
                 if (!(spawn instanceof S0EPacketSpawnObject || spawn instanceof S10PacketSpawnPainting || spawn instanceof S11PacketSpawnExperienceOrb)) continue;
                 packets.add(spawn);
+                if (!(spawn instanceof S10PacketSpawnPainting)) packets.add(serverPosition(entity)); // a painting's is never set
                 // unlike S0C and S0F the spawn carries no metadata: the dropped item's stack, the framed item
                 if (!entity.getDataWatcher().getIsBlank()) packets.add(new S1CPacketEntityMetadata(entity.getEntityId(), entity.getDataWatcher(), true));
                 // S0F carries its own velocity; S0C players are interpolated, so motion means nothing for them
@@ -361,6 +365,14 @@ public final class Recording {
             }
         }
         return packets;
+    }
+
+    // the spawn packets take posX, which is still gliding toward serverPosX; the server's relative moves build on the
+    // latter, so spawning at the former leaves the entity off by the glide's gap until the server next teleports it
+    private static S18PacketEntityTeleport serverPosition(Entity entity) {
+        return new S18PacketEntityTeleport(entity.getEntityId(), entity.serverPosX, entity.serverPosY, entity.serverPosZ,
+                (byte) MathHelper.floor_float(entity.rotationYaw * 256 / 360),
+                (byte) MathHelper.floor_float(entity.rotationPitch * 256 / 360), entity.onGround);
     }
 
     // held item and armor, slots 0-4, as EntityTrackerEntry sends them after a spawn

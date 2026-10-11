@@ -83,7 +83,7 @@ set of clientbound packets describing the world as the client knew it at that in
 Join Game, server brand, spawn position, the tab list with its header and footer, time,
 one Chunk Data per loaded chunk, sign and tile entity data, map contents, weather, world
 border, scoreboard, the player's inventory, health and experience, Player Position And
-Look, then a spawn for every other entity in view with its equipment, head yaw, bed, attributes,
+Look, then a spawn for every other entity in view, an Entity Teleport to the server's exact position for it (none for paintings), its equipment, head yaw, bed, attributes,
 potion effects and riding or leash links. Right after Player Position And Look comes an Entity
 Metadata for the player's own entity id holding only index 10, the skin layers (hat, jacket,
 sleeves, trousers, cape) the client had switched on. They all carry `time` 0 and are encoded exactly like real
