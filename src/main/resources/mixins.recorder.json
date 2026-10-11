@@ -5,6 +5,7 @@
   "refmap": "mixins.recorder.refmap.json",
   "client": [
     "AccessorChunkProviderClient",
+    "MixinAbstractClientPlayer",
     "AccessorGuiPlayerTabOverlay",
     "AccessorMapStorage",
     "AccessorS38PacketPlayerListItem",
