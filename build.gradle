@@ -6,7 +6,6 @@ plugins {
 }
 
 group = 'net.toshimichi'
-version = '1.0'
 base.archivesName = 'recorder'
 
 java {

@@ -16,7 +16,7 @@ The file format is documented in [`RECORDING_FORMAT.md`](src/main/resources/RECO
 ./gradlew build
 ```
 
-The mod jar is written to `build/libs/recorder-1.0.jar`. Drop it into `.minecraft/mods`.
+The mod jar is written to `build/libs/recorder.jar`. Drop it into `.minecraft/mods`.
 
 ## License
 
