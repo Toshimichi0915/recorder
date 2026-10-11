@@ -35,6 +35,7 @@ import net.minecraft.network.play.server.S01PacketJoinGame;
 import net.minecraft.network.play.server.S07PacketRespawn;
 import net.minecraft.network.play.server.S08PacketPlayerPosLook;
 import net.minecraft.network.play.server.S12PacketEntityVelocity;
+import net.minecraft.network.play.server.S1BPacketEntityAttach;
 import net.minecraft.network.play.server.S1CPacketEntityMetadata;
 import net.minecraft.network.play.server.S38PacketPlayerListItem;
 import net.minecraft.network.play.server.S39PacketPlayerAbilities;
@@ -45,6 +46,7 @@ import net.minecraft.util.MovingObjectPosition;
 import net.minecraft.util.Vec3;
 import net.minecraft.world.WorldSettings;
 import net.minecraftforge.fml.common.network.handshake.NetworkDispatcher;
+import net.toshimichi.recorder.mixin.AccessorEntityOtherPlayerMP;
 import net.toshimichi.recorder.mixin.AccessorS38PacketPlayerListItem;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -215,6 +217,7 @@ public final class Replay {
         NetworkPlayerInfo info = handler.getPlayerInfo(profile.getId());
         puppet = new EntityOtherPlayerMP(mc.theWorld, info != null ? info.getGameProfile() : profile);
         puppet.setPositionAndRotation(player.posX, player.posY, player.posZ, player.rotationYaw, player.rotationPitch);
+        puppet.setPositionAndRotation2(player.posX, player.posY, player.posZ, player.rotationYaw, player.rotationPitch, 0, false);
         // share the arrays: the replayed inventory packets fill the viewer's inventory, the puppet shows it
         puppet.inventory.mainInventory = player.inventory.mainInventory;
         puppet.inventory.armorInventory = player.inventory.armorInventory;
@@ -290,6 +293,12 @@ public final class Replay {
                 } else if (packet instanceof S39PacketPlayerAbilities) {
                     // the puppet keeps the creative flag for placement; the rest would shove the spectator around
                     puppet.capabilities.isCreativeMode = ((S39PacketPlayerAbilities) packet).isCreativeMode();
+                } else if (packet instanceof S1BPacketEntityAttach && ((S1BPacketEntityAttach) packet).getLeash() == 0
+                        && ((S1BPacketEntityAttach) packet).getEntityId() == mc.thePlayer.getEntityId()) {
+                    // the recorded player's ride is the puppet's; the handler would seat the viewer
+                    puppet.mountEntity(mc.theWorld.getEntityByID(((S1BPacketEntityAttach) packet).getVehicleEntityId()));
+                    // getting off sets the puppet down on the mount; glide from there, not from before the ride
+                    puppet.setPositionAndRotation2(puppet.posX, puppet.posY, puppet.posZ, puppet.rotationYaw, puppet.rotationPitch, 0, false);
                 } else if (!(packet instanceof S12PacketEntityVelocity
                         && ((S12PacketEntityVelocity) packet).getEntityID() == mc.thePlayer.getEntityId())) {
                     // self velocity would shove the spectator around
@@ -298,12 +307,15 @@ public final class Replay {
             } else if (puppet != null) {
                 if (packet instanceof C03PacketPlayer) {
                     C03PacketPlayer move = (C03PacketPlayer) packet;
+                    // what a packet leaves out stays at the glide's target: the puppet itself lags behind it, and
+                    // a standing player sends position only once a second, so each tick would cut the glide short
+                    AccessorEntityOtherPlayerMP target = (AccessorEntityOtherPlayerMP) puppet;
                     puppet.setPositionAndRotation2(
-                            move.isMoving() ? move.getPositionX() : puppet.posX,
-                            move.isMoving() ? move.getPositionY() : puppet.posY,
-                            move.isMoving() ? move.getPositionZ() : puppet.posZ,
-                            move.getRotating() ? move.getYaw() : puppet.rotationYaw,
-                            move.getRotating() ? move.getPitch() : puppet.rotationPitch, 3, false);
+                            move.isMoving() ? move.getPositionX() : target.getTargetX(),
+                            move.isMoving() ? move.getPositionY() : target.getTargetY(),
+                            move.isMoving() ? move.getPositionZ() : target.getTargetZ(),
+                            move.getRotating() ? move.getYaw() : (float) target.getTargetYaw(),
+                            move.getRotating() ? move.getPitch() : (float) target.getTargetPitch(), 3, false);
                     if (move.getRotating()) puppet.setRotationYawHead(move.getYaw());
                     puppet.onGround = move.isOnGround(); // break speed drops fivefold in the air
                 } else if (packet instanceof C07PacketPlayerDigging) {
