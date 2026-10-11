@@ -18,6 +18,7 @@ public abstract class MixinGuiIngameMenu extends GuiScreen {
     private static final int RECORD_BUTTON = 0x5245_4331;
     private static final int PAUSE_BUTTON = 0x5245_4332;
     private static final int SEEK_SLIDER = 0x5245_4333;
+    private static final int GAME_MODE_BUTTON = 0x5245_4334;
 
     // the row under Disconnect, which Forge's layout leaves free
     @Inject(method = "initGui", at = @At("RETURN"))
@@ -29,6 +30,7 @@ public abstract class MixinGuiIngameMenu extends GuiScreen {
         } else {
             buttonList.add(new GuiButton(PAUSE_BUTTON, width / 2 - 100, y, 98, 20, pauseLabel(replay)));
             buttonList.add(new SeekSlider(SEEK_SLIDER, width / 2 + 2, y, 98, replay));
+            buttonList.add(new GuiButton(GAME_MODE_BUTTON, width / 2 - 100, y + 24, gameModeLabel(replay)));
         }
     }
 
@@ -44,6 +46,10 @@ public abstract class MixinGuiIngameMenu extends GuiScreen {
                 replay.togglePause();
                 button.displayString = pauseLabel(replay);
                 break;
+            case GAME_MODE_BUTTON:
+                replay.cycleGameType();
+                button.displayString = gameModeLabel(replay);
+                break;
             case DISCONNECT_BUTTON:
                 // vanilla would hand a replay over to the multiplayer screen
                 if (replay == null) return;
@@ -55,6 +61,11 @@ public abstract class MixinGuiIngameMenu extends GuiScreen {
 
     private static String recordLabel() {
         return Recording.isRecording() ? "Stop Recording" : "Start Recording";
+    }
+
+    private static String gameModeLabel(Replay replay) {
+        String name = replay.getGameType().getName();
+        return "Game Mode: " + Character.toUpperCase(name.charAt(0)) + name.substring(1);
     }
 
     private static String pauseLabel(Replay replay) {

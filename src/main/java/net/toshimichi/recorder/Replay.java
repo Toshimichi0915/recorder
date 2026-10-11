@@ -57,7 +57,7 @@ import java.util.List;
 /**
  * Feeds a recording into a fresh NetHandlerPlayClient over a channel that goes nowhere.
  * Clientbound packets drive the world. The viewer is a spectator; the recorded player is a puppet entity
- * driven by its own serverbound packets. Left-click an entity to see through its eyes, sneak to let go.
+ * driven by its own serverbound packets (the viewer's mode can be switched from the pause menu). Left-click an entity to see through its eyes, sneak to let go.
  */
 public final class Replay {
 
@@ -82,6 +82,7 @@ public final class Replay {
     private long base;       // replay millis at the last resume or jump
     private long resumedAt;  // wall clock at the last resume or jump
     private WorldExport export; // only while converting
+    private WorldSettings.GameType gameType = WorldSettings.GameType.SPECTATOR; // the viewer's, outlives seeks
 
     private Replay(GuiScreen parent, RecordingFile.Contents contents) {
         this.parent = parent;
@@ -130,6 +131,18 @@ public final class Replay {
         return entries.isEmpty() ? 0 : entries.get(entries.size() - 1).time;
     }
 
+    public WorldSettings.GameType getGameType() {
+        return gameType;
+    }
+
+    public void cycleGameType() {
+        switch (gameType) {
+            case SPECTATOR: gameType = WorldSettings.GameType.CREATIVE; break;
+            case CREATIVE: gameType = WorldSettings.GameType.SURVIVAL; break;
+            default: gameType = WorldSettings.GameType.SPECTATOR; break;
+        }
+    }
+
     public void togglePause() {
         base = elapsed();
         resumedAt = System.currentTimeMillis();
@@ -138,13 +151,20 @@ public final class Replay {
 
     // backwards means a new world fast-forwarded from the start: packets cannot be undone
     public void jump(long millis) {
+        EntityPlayerSP before = null;
         if (millis < elapsed()) {
+            before = mc.thePlayer;
             mc.loadWorld((WorldClient) null);
             connect();
         }
         base = millis;
         resumedAt = System.currentTimeMillis();
         tick();
+        // the new world puts the viewer back at the snapshot; keep them where they were, unless that was another dimension
+        EntityPlayerSP player = mc.thePlayer;
+        if (before != null && player != null && player.dimension == before.dimension) {
+            player.setPositionAndRotation(before.posX, before.posY, before.posZ, before.rotationYaw, before.rotationPitch);
+        }
     }
 
     public void exit() {
@@ -169,9 +189,9 @@ public final class Replay {
         if (digPos != null) {
             mc.theWorld.sendBlockBreakProgress(PUPPET_ID, digPos, (int) Math.min(9, (elapsed - digStart) * 10 / digDuration) - 1);
         }
-        // the recording may carry the server's own game mode changes; the viewer stays a ghost
-        if (mc.playerController.getCurrentGameType() != WorldSettings.GameType.SPECTATOR) {
-            mc.playerController.setGameType(WorldSettings.GameType.SPECTATOR);
+        // the recording may carry the server's own game mode changes; the viewer keeps the one picked
+        if (mc.playerController.getCurrentGameType() != gameType) {
+            mc.playerController.setGameType(gameType);
         }
 
         boolean down = Mouse.isButtonDown(0);
@@ -202,7 +222,7 @@ public final class Replay {
         puppet.capabilities.isCreativeMode = player.capabilities.isCreativeMode; // before the viewer turns spectator
         puppet.getDataWatcher().updateObject(10, skinParts);
         mc.theWorld.addEntityToWorld(PUPPET_ID, puppet);
-        mc.playerController.setGameType(WorldSettings.GameType.SPECTATOR);
+        mc.playerController.setGameType(gameType);
         // step back so the first thing on screen is not the inside of the puppet's head
         Vec3 look = player.getLookVec();
         player.setPosition(player.posX - look.xCoord * 3, player.posY + 1, player.posZ - look.zCoord * 3);
