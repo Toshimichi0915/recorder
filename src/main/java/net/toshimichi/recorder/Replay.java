@@ -6,6 +6,7 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.entity.AbstractClientPlayer;
 import net.minecraft.client.entity.EntityOtherPlayerMP;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.gui.GuiScreen;
@@ -19,6 +20,7 @@ import net.minecraft.network.NetworkManager;
 import net.minecraft.network.Packet;
 import net.minecraft.network.PacketBuffer;
 import net.minecraft.entity.DataWatcher;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.block.Block;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
@@ -231,14 +233,20 @@ public final class Replay {
 
     @SuppressWarnings("unchecked")
     private void feed(RecordingFile.Entry entry) {
+        if (entry.direction == RecordingFile.INPUT) return; // key presses, not packets: a mouse row reads as an S01
         boolean serverbound = entry.direction == RecordingFile.SERVERBOUND;
         try {
             Packet packet = decode(entry);
 
-            if (packet instanceof S38PacketPlayerListItem) ownSkin((S38PacketPlayerListItem) packet);
+            if (packet instanceof S38PacketPlayerListItem) {
+                ownSkin((S38PacketPlayerListItem) packet);
+                keepSkins((S38PacketPlayerListItem) packet);
+            }
             if (packet instanceof S1CPacketEntityMetadata && ((S1CPacketEntityMetadata) packet).getEntityId() == mc.thePlayer.getEntityId()) {
                 // the recorded player's own metadata is the puppet's; only the skin layers, health would kill it off
-                for (DataWatcher.WatchableObject object : ((S1CPacketEntityMetadata) packet).func_149376_c()) {
+                List<DataWatcher.WatchableObject> objects = ((S1CPacketEntityMetadata) packet).func_149376_c();
+                // an empty update decodes as null, not an empty list
+                if (objects != null) for (DataWatcher.WatchableObject object : objects) {
                     if (object.getDataValueId() == 10) skinParts = (Byte) object.getObject();
                 }
                 if (puppet != null) puppet.getDataWatcher().updateObject(10, skinParts);
@@ -314,6 +322,16 @@ public final class Replay {
             if (data.getProfile().getId().equals(profile.getId()) && !data.getProfile().getProperties().containsKey("textures")) {
                 players.set(i, packet.new AddPlayerData(profile, data.getPing(), data.getGameMode(), data.getDisplayName()));
             }
+        }
+    }
+
+    // NPCs are listed only long enough to spawn: a player looks up its skin on first render, which a seek or
+    // the snapshot never gets to before the removal, so make it look now while the entry is still there
+    private void keepSkins(S38PacketPlayerListItem packet) {
+        if (packet.getAction() != S38PacketPlayerListItem.Action.REMOVE_PLAYER || mc.theWorld == null) return;
+        for (S38PacketPlayerListItem.AddPlayerData data : packet.getEntries()) {
+            EntityPlayer player = mc.theWorld.getPlayerEntityByUUID(data.getProfile().getId());
+            if (player instanceof AbstractClientPlayer) ((AbstractClientPlayer) player).getLocationSkin();
         }
     }
 

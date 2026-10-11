@@ -69,6 +69,7 @@ import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.IChatComponent;
 import net.minecraft.util.MathHelper;
 import net.minecraft.world.WorldSavedData;
+import net.minecraft.world.WorldSettings;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.storage.MapData;
 import net.minecraftforge.fml.common.network.internal.FMLProxyPacket;
@@ -234,6 +235,15 @@ public final class Recording {
             ((AccessorS38PacketPlayerListItem) tabList).getPlayers().add(tabList.new AddPlayerData(
                     info.getGameProfile(), info.getResponseTime(), info.getGameType(), info.getDisplayName()));
         }
+        // NPCs: servers list them only long enough to spawn them, and the client needs the entry for S0C
+        S38PacketPlayerListItem unlisted = new S38PacketPlayerListItem();
+        ((AccessorS38PacketPlayerListItem) unlisted).setAction(S38PacketPlayerListItem.Action.REMOVE_PLAYER);
+        for (Entity entity : world.loadedEntityList) {
+            if (!(entity instanceof EntityOtherPlayerMP) || player.sendQueue.getPlayerInfo(entity.getUniqueID()) != null) continue;
+            GameProfile npc = ((EntityPlayer) entity).getGameProfile();
+            ((AccessorS38PacketPlayerListItem) tabList).getPlayers().add(tabList.new AddPlayerData(npc, 0, WorldSettings.GameType.SURVIVAL, null));
+            ((AccessorS38PacketPlayerListItem) unlisted).getPlayers().add(unlisted.new AddPlayerData(npc, 0, null, null));
+        }
         packets.add(tabList);
         AccessorGuiPlayerTabOverlay tabOverlay = (AccessorGuiPlayerTabOverlay) mc.ingameGUI.getTabList();
         if (tabOverlay.getHeader() != null || tabOverlay.getFooter() != null) {
@@ -333,6 +343,8 @@ public final class Recording {
                 packets.add(new S12PacketEntityVelocity(entity.getEntityId(), entity.motionX, entity.motionY, entity.motionZ));
             }
         }
+
+        if (!unlisted.getEntries().isEmpty()) packets.add(unlisted);
 
         // after every spawn, so both ends of each link exist on replay; the player is in here too
         for (Entity entity : world.loadedEntityList) {
