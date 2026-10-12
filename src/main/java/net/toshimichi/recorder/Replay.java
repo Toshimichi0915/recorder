@@ -20,6 +20,7 @@ import net.minecraft.network.NetworkManager;
 import net.minecraft.network.Packet;
 import net.minecraft.network.PacketBuffer;
 import net.minecraft.entity.DataWatcher;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.block.Block;
 import net.minecraft.block.material.Material;
@@ -39,11 +40,14 @@ import net.minecraft.network.play.server.S1BPacketEntityAttach;
 import net.minecraft.network.play.server.S1CPacketEntityMetadata;
 import net.minecraft.network.play.server.S38PacketPlayerListItem;
 import net.minecraft.network.play.server.S39PacketPlayerAbilities;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.BlockPos;
+import net.minecraft.util.MathHelper;
 import net.minecraft.util.EnumFacing;
 import net.minecraft.util.MovingObjectPosition;
 import net.minecraft.util.Vec3;
+import net.minecraft.world.World;
 import net.minecraft.world.WorldSettings;
 import net.minecraftforge.fml.common.network.handshake.NetworkDispatcher;
 import net.toshimichi.recorder.mixin.AccessorEntityOtherPlayerMP;
@@ -204,8 +208,10 @@ public final class Replay {
         }
         clickWasDown = down;
 
-        if (mc.getRenderViewEntity() != mc.thePlayer
-                && (mc.gameSettings.keyBindSneak.isKeyDown() || mc.getRenderViewEntity().isDead)) {
+        Entity view = mc.getRenderViewEntity();
+        if (view != mc.thePlayer && (mc.gameSettings.keyBindSneak.isKeyDown() || view.isDead)) {
+            // let go where they were looking from, as vanilla spectating leaves you
+            mc.thePlayer.setPositionAndRotation(view.posX, view.posY, view.posZ, view.rotationYaw, view.rotationPitch);
             mc.setRenderViewEntity(mc.thePlayer);
         }
     }
@@ -215,7 +221,7 @@ public final class Replay {
         EntityPlayerSP player = mc.thePlayer;
         // the name and skin the server listed at this point, as a nick plugin may have changed them; the skin is looked up by UUID
         NetworkPlayerInfo info = handler.getPlayerInfo(profile.getId());
-        puppet = new EntityOtherPlayerMP(mc.theWorld, info != null ? info.getGameProfile() : profile);
+        puppet = new Puppet(mc.theWorld, info != null ? info.getGameProfile() : profile);
         puppet.setPositionAndRotation(player.posX, player.posY, player.posZ, player.rotationYaw, player.rotationPitch);
         puppet.setPositionAndRotation2(player.posX, player.posY, player.posZ, player.rotationYaw, player.rotationPitch, 0, false);
         // share the arrays: the replayed inventory packets fill the viewer's inventory, the puppet shows it
@@ -461,6 +467,40 @@ public final class Replay {
             return packet;
         } finally {
             buf.release();
+        }
+    }
+
+    // the server leaves a player's own sounds to their client, so the recording never has their footsteps;
+    // this plays them the way the recorder's client did
+    private static final class Puppet extends EntityOtherPlayerMP {
+
+        private int nextStep;
+
+        Puppet(World world, GameProfile profile) {
+            super(world, profile);
+        }
+
+        // EntityPlayer's goes to everyone near but this player, which a client never sends anywhere
+        @Override
+        public void playSound(String name, float volume, float pitch) {
+            if (!isSilent()) worldObj.playSound(posX, posY, posZ, name, volume, pitch, false);
+        }
+
+        // like Entity.moveEntity, which the puppet's glide never calls
+        // ponytail: no swim splashes, no fence-top steps; add from moveEntity if missed
+        @Override
+        public void onLivingUpdate() {
+            double x = posX, y = posY, z = posZ;
+            super.onLivingUpdate();
+            if (ridingEntity != null || onGround && isSneaking()) return;
+            BlockPos pos = new BlockPos(MathHelper.floor_double(posX), MathHelper.floor_double(posY - 0.2), MathHelper.floor_double(posZ));
+            Block block = worldObj.getBlockState(pos).getBlock();
+            double dy = block == Blocks.ladder ? posY - y : 0;
+            distanceWalkedOnStepModified += MathHelper.sqrt_double((posX - x) * (posX - x) + dy * dy + (posZ - z) * (posZ - z)) * 0.6;
+            if (distanceWalkedOnStepModified > nextStep && block.getMaterial() != Material.air) {
+                nextStep = (int) distanceWalkedOnStepModified + 1;
+                playStepSound(pos, block);
+            }
         }
     }
 }

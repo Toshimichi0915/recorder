@@ -7,6 +7,7 @@
     "AccessorChunkProviderClient",
     "AccessorEntityOtherPlayerMP",
     "MixinAbstractClientPlayer",
+    "MixinEntityRenderer",
     "AccessorGuiPlayerTabOverlay",
     "AccessorMapStorage",
     "AccessorS38PacketPlayerListItem",
@@ -14,6 +15,7 @@
     "InvokerEntityTrackerEntry",
     "MixinGuiIngameMenu",
     "MixinGuiMainMenu",
+    "MixinMinecraft",
     "MixinMessageDeserializer",
     "MixinMessageSerializer",
     "MixinNetworkManager"
