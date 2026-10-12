@@ -47,8 +47,11 @@ public abstract class MixinItemRenderer {
         }
         float pitch = puppet.prevArmPitch + (puppet.armPitch - puppet.prevArmPitch) * partialTicks;
         float yaw = puppet.prevArmYaw + (puppet.armYaw - puppet.prevArmYaw) * partialTicks;
-        GlStateManager.rotate((puppet.rotationPitch - pitch) * 0.1F, 1.0F, 0.0F, 0.0F);
-        GlStateManager.rotate((puppet.rotationYaw - yaw) * 0.1F, 0.0F, 1.0F, 0.0F);
+        // the look interpolated as the camera has it: the recorder's own changed every frame, the puppet's every tick
+        float lookPitch = puppet.prevRotationPitch + (puppet.rotationPitch - puppet.prevRotationPitch) * partialTicks;
+        float lookYaw = puppet.prevRotationYaw + (puppet.rotationYaw - puppet.prevRotationYaw) * partialTicks;
+        GlStateManager.rotate((lookPitch - pitch) * 0.1F, 1.0F, 0.0F, 0.0F);
+        GlStateManager.rotate((lookYaw - yaw) * 0.1F, 0.0F, 1.0F, 0.0F);
     }
 
     @ModifyVariable(method = "renderItemInFirstPerson", at = @At(value = "INVOKE",
