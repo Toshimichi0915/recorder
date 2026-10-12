@@ -10,14 +10,18 @@
     "MixinEntityRenderer",
     "AccessorGuiPlayerTabOverlay",
     "AccessorMapStorage",
+    "AccessorMinecraft",
+    "AccessorPlayerControllerMP",
     "AccessorS38PacketPlayerListItem",
     "InvokerAnvilChunkLoader",
     "InvokerEntityTrackerEntry",
     "MixinGuiIngameMenu",
     "MixinGuiMainMenu",
+    "MixinItemRenderer",
     "MixinMinecraft",
     "MixinMessageDeserializer",
     "MixinMessageSerializer",
-    "MixinNetworkManager"
+    "MixinNetworkManager",
+    "MixinRendererLivingEntity"
   ]
 }

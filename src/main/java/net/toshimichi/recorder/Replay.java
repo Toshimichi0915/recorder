@@ -22,6 +22,7 @@ import net.minecraft.network.PacketBuffer;
 import net.minecraft.entity.DataWatcher;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.inventory.Container;
 import net.minecraft.block.Block;
 import net.minecraft.block.material.Material;
 import net.minecraft.block.state.IBlockState;
@@ -32,12 +33,16 @@ import net.minecraft.network.play.client.C09PacketHeldItemChange;
 import net.minecraft.network.play.client.C0APacketAnimation;
 import net.minecraft.network.play.client.C0BPacketEntityAction;
 import net.minecraft.network.play.client.C0DPacketCloseWindow;
+import net.minecraft.network.play.client.C0EPacketClickWindow;
 import net.minecraft.network.play.server.S01PacketJoinGame;
+import net.minecraft.network.play.server.S06PacketUpdateHealth;
 import net.minecraft.network.play.server.S07PacketRespawn;
 import net.minecraft.network.play.server.S08PacketPlayerPosLook;
 import net.minecraft.network.play.server.S12PacketEntityVelocity;
 import net.minecraft.network.play.server.S1BPacketEntityAttach;
+import net.minecraft.network.play.server.S19PacketEntityStatus;
 import net.minecraft.network.play.server.S1CPacketEntityMetadata;
+import net.minecraft.network.play.server.S20PacketEntityProperties;
 import net.minecraft.network.play.server.S38PacketPlayerListItem;
 import net.minecraft.network.play.server.S39PacketPlayerAbilities;
 import net.minecraft.init.Blocks;
@@ -83,6 +88,7 @@ public final class Replay {
     private BlockPos digPos; // the puppet's cracks: the server shows them to everyone but the digger
     private long digStart;
     private long digDuration;
+    private float health; // as the server sent it, before the client clamped it to a max health not yet raised
     private int index;
     private boolean paused;
     private long base;       // replay millis at the last resume or jump
@@ -139,6 +145,17 @@ public final class Replay {
 
     public WorldSettings.GameType getGameType() {
         return gameType;
+    }
+
+    // the recorded player's body, else null
+    public static Puppet recorded() {
+        return current != null ? (Puppet) current.puppet : null;
+    }
+
+    // the recorded player while the viewer looks through their eyes, else null
+    public static Puppet possessed() {
+        Puppet puppet = recorded();
+        return puppet != null && Minecraft.getMinecraft().getRenderViewEntity() == puppet ? puppet : null;
     }
 
     public void cycleGameType() {
@@ -272,11 +289,13 @@ public final class Replay {
                 keepSkins((S38PacketPlayerListItem) packet);
             }
             if (packet instanceof S1CPacketEntityMetadata && ((S1CPacketEntityMetadata) packet).getEntityId() == mc.thePlayer.getEntityId()) {
-                // the recorded player's own metadata is the puppet's; only the skin layers, health would kill it off
+                // the recorded player's own metadata is the puppet's; only the flags (eating, burning...) and the
+                // skin layers, health would kill it off
                 List<DataWatcher.WatchableObject> objects = ((S1CPacketEntityMetadata) packet).func_149376_c();
                 // an empty update decodes as null, not an empty list
                 if (objects != null) for (DataWatcher.WatchableObject object : objects) {
                     if (object.getDataValueId() == 10) skinParts = (Byte) object.getObject();
+                    if (object.getDataValueId() == 0 && puppet != null) puppet.getDataWatcher().updateObject(0, object.getObject());
                 }
                 if (puppet != null) puppet.getDataWatcher().updateObject(10, skinParts);
                 return;
@@ -288,7 +307,9 @@ public final class Replay {
                 if (packet instanceof S01PacketJoinGame || packet instanceof S07PacketRespawn) {
                     puppet = null;
                     digPos = null;
+                    health = 0;
                 }
+                if (packet instanceof S06PacketUpdateHealth) health = ((S06PacketUpdateHealth) packet).getHealth();
                 if (puppet == null) {
                     packet.processPacket(handler);
                     if (packet instanceof S08PacketPlayerPosLook) spawnPuppet();
@@ -305,10 +326,19 @@ public final class Replay {
                     puppet.mountEntity(mc.theWorld.getEntityByID(((S1BPacketEntityAttach) packet).getVehicleEntityId()));
                     // getting off sets the puppet down on the mount; glide from there, not from before the ride
                     puppet.setPositionAndRotation2(puppet.posX, puppet.posY, puppet.posZ, puppet.rotationYaw, puppet.rotationPitch, 0, false);
+                } else if (packet instanceof S19PacketEntityStatus && ((S19PacketEntityStatus) packet).getOpCode() == 2
+                        && ((S19PacketEntityStatus) packet).getEntity(mc.theWorld) == mc.thePlayer) {
+                    // the recorded player's hurt is the puppet's: its red flash, its sound and the shake through its eyes
+                    puppet.handleStatusUpdate((byte) 2);
                 } else if (!(packet instanceof S12PacketEntityVelocity
                         && ((S12PacketEntityVelocity) packet).getEntityID() == mc.thePlayer.getEntityId())) {
                     // self velocity would shove the spectator around
                     packet.processPacket(handler);
+                }
+                // a max health above 20 may arrive after the health it allows, as in the snapshot
+                if (packet instanceof S20PacketEntityProperties && ((S20PacketEntityProperties) packet).getEntityId() == mc.thePlayer.getEntityId()
+                        && health > mc.thePlayer.getHealth()) {
+                    mc.thePlayer.setHealth(health);
                 }
             } else if (puppet != null) {
                 if (packet instanceof C03PacketPlayer) {
@@ -332,9 +362,19 @@ public final class Replay {
                     puppet.swingItem();
                 } else if (packet instanceof C09PacketHeldItemChange) {
                     puppet.inventory.currentItem = ((C09PacketHeldItemChange) packet).getSlotId();
+                    // the hotbar and the first person hand read the viewer's
+                    mc.thePlayer.inventory.currentItem = puppet.inventory.currentItem;
                 } else if (packet instanceof C0DPacketCloseWindow) {
                     // the server never echoes a close: the client shuts its own window and only tells the server
                     if (mc.currentScreen instanceof GuiContainer) mc.thePlayer.closeScreenAndDropStack();
+                } else if (packet instanceof C0EPacketClickWindow) {
+                    // like PlayerControllerMP.windowClick: the server never echoes a click it agrees with, the
+                    // client has already moved the stacks; a refusal resends the whole window
+                    C0EPacketClickWindow click = (C0EPacketClickWindow) packet;
+                    Container container = mc.thePlayer.openContainer;
+                    if (container.windowId == click.getWindowId()) {
+                        container.slotClick(click.getSlotId(), click.getUsedButton(), click.getMode(), mc.thePlayer);
+                    }
                 } else if (packet instanceof C0BPacketEntityAction) {
                     switch (((C0BPacketEntityAction) packet).getAction()) {
                         case START_SNEAKING: puppet.setSneaking(true); break;
@@ -422,7 +462,7 @@ public final class Replay {
         // the stack is the viewer's own; the server only resends it when its count disagrees with the client's
         int meta = held.getMetadata();
         int size = held.stackSize;
-        held.onItemUse(puppet, mc.theWorld, pos, side, x, y, z);
+        if (held.onItemUse(puppet, mc.theWorld, pos, side, x, y, z)) mc.getItemRenderer().resetEquippedProgress(); // the hand dips
         if (puppet.capabilities.isCreativeMode) {
             held.setItemDamage(meta);
             held.stackSize = size;
@@ -472,9 +512,10 @@ public final class Replay {
 
     // the server leaves a player's own sounds to their client, so the recording never has their footsteps;
     // this plays them the way the recorder's client did
-    private static final class Puppet extends EntityOtherPlayerMP {
+    public static final class Puppet extends EntityOtherPlayerMP {
 
         private int nextStep;
+        public float armPitch, prevArmPitch, armYaw, prevArmYaw; // like EntityPlayerSP's, for the first person hand's sway
 
         Puppet(World world, GameProfile profile) {
             super(world, profile);
@@ -486,12 +527,22 @@ public final class Replay {
             if (!isSilent()) worldObj.playSound(posX, posY, posZ, name, volume, pitch, false);
         }
 
+        // what the recorded player's own screen was drawn for
+        public WorldSettings.GameType getGameType() {
+            NetworkPlayerInfo info = getPlayerInfo();
+            return info != null ? info.getGameType() : WorldSettings.GameType.SURVIVAL;
+        }
+
         // like Entity.moveEntity, which the puppet's glide never calls
         // ponytail: no swim splashes, no fence-top steps; add from moveEntity if missed
         @Override
         public void onLivingUpdate() {
             double x = posX, y = posY, z = posZ;
             super.onLivingUpdate();
+            prevArmPitch = armPitch;
+            prevArmYaw = armYaw;
+            armPitch += (rotationPitch - armPitch) * 0.5F;
+            armYaw += (rotationYaw - armYaw) * 0.5F;
             if (ridingEntity != null || onGround && isSneaking()) return;
             BlockPos pos = new BlockPos(MathHelper.floor_double(posX), MathHelper.floor_double(posY - 0.2), MathHelper.floor_double(posZ));
             Block block = worldObj.getBlockState(pos).getBlock();
