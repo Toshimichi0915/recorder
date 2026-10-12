@@ -55,7 +55,6 @@ import net.minecraft.util.Vec3;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldSettings;
 import net.minecraftforge.fml.common.network.handshake.NetworkDispatcher;
-import net.toshimichi.recorder.mixin.AccessorEntityOtherPlayerMP;
 import net.toshimichi.recorder.mixin.AccessorS38PacketPlayerListItem;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -63,6 +62,7 @@ import org.lwjgl.input.Mouse;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -80,6 +80,7 @@ public final class Replay {
     private final Minecraft mc = Minecraft.getMinecraft();
     private final GuiScreen parent;
     private final List<RecordingFile.Entry> entries;
+    private final List<Move> moves; // where the recorded player went, read ahead of the replay
     private final GameProfile profile; // who recorded it, not who is watching
     private NetHandlerPlayClient handler;
     private EntityOtherPlayerMP puppet;
@@ -99,6 +100,7 @@ public final class Replay {
     private Replay(GuiScreen parent, RecordingFile.Contents contents) {
         this.parent = parent;
         this.entries = contents.entries;
+        this.moves = moves(entries);
         // version 1 files never stored it; the viewer is the best guess
         this.profile = contents.profile != null ? contents.profile : mc.getSession().getProfile();
     }
@@ -209,6 +211,7 @@ public final class Replay {
         }
 
         if (puppet == null) return;
+        move(elapsed);
         if (digPos != null) {
             mc.theWorld.sendBlockBreakProgress(PUPPET_ID, digPos, (int) Math.min(9, (elapsed - digStart) * 10 / digDuration) - 1);
         }
@@ -314,9 +317,7 @@ public final class Replay {
                     packet.processPacket(handler);
                     if (packet instanceof S08PacketPlayerPosLook) spawnPuppet();
                 } else if (packet instanceof S08PacketPlayerPosLook) {
-                    // ponytail: relative flags ignored; 1.8 servers teleport absolutely
-                    S08PacketPlayerPosLook pos = (S08PacketPlayerPosLook) packet;
-                    puppet.setPositionAndRotation2(pos.getX(), pos.getY(), pos.getZ(), pos.getYaw(), pos.getPitch(), 3, false);
+                    // the puppet's teleport is move()'s; the handler would move the viewer
                 } else if (packet instanceof S39PacketPlayerAbilities) {
                     // the puppet keeps the creative flag for placement; the rest would shove the spectator around
                     puppet.capabilities.isCreativeMode = ((S39PacketPlayerAbilities) packet).isCreativeMode();
@@ -324,8 +325,6 @@ public final class Replay {
                         && ((S1BPacketEntityAttach) packet).getEntityId() == mc.thePlayer.getEntityId()) {
                     // the recorded player's ride is the puppet's; the handler would seat the viewer
                     puppet.mountEntity(mc.theWorld.getEntityByID(((S1BPacketEntityAttach) packet).getVehicleEntityId()));
-                    // getting off sets the puppet down on the mount; glide from there, not from before the ride
-                    puppet.setPositionAndRotation2(puppet.posX, puppet.posY, puppet.posZ, puppet.rotationYaw, puppet.rotationPitch, 0, false);
                 } else if (packet instanceof S19PacketEntityStatus && ((S19PacketEntityStatus) packet).getOpCode() == 2
                         && ((S19PacketEntityStatus) packet).getEntity(mc.theWorld) == mc.thePlayer) {
                     // the recorded player's hurt is the puppet's: its red flash, its sound and the shake through its eyes
@@ -342,18 +341,8 @@ public final class Replay {
                 }
             } else if (puppet != null) {
                 if (packet instanceof C03PacketPlayer) {
-                    C03PacketPlayer move = (C03PacketPlayer) packet;
-                    // what a packet leaves out stays at the glide's target: the puppet itself lags behind it, and
-                    // a standing player sends position only once a second, so each tick would cut the glide short
-                    AccessorEntityOtherPlayerMP target = (AccessorEntityOtherPlayerMP) puppet;
-                    puppet.setPositionAndRotation2(
-                            move.isMoving() ? move.getPositionX() : target.getTargetX(),
-                            move.isMoving() ? move.getPositionY() : target.getTargetY(),
-                            move.isMoving() ? move.getPositionZ() : target.getTargetZ(),
-                            move.getRotating() ? move.getYaw() : (float) target.getTargetYaw(),
-                            move.getRotating() ? move.getPitch() : (float) target.getTargetPitch(), 3, false);
-                    if (move.getRotating()) puppet.setRotationYawHead(move.getYaw());
-                    puppet.onGround = move.isOnGround(); // break speed drops fivefold in the air
+                    // where it goes is move()'s; break speed drops fivefold in the air
+                    puppet.onGround = ((C03PacketPlayer) packet).isOnGround();
                 } else if (packet instanceof C07PacketPlayerDigging) {
                     dig((C07PacketPlayerDigging) packet, entry.time);
                 } else if (packet instanceof C08PacketPlayerBlockPlacement) {
@@ -387,6 +376,96 @@ public final class Replay {
             }
         } catch (Exception e) {
             log.warn("Skipping a packet at {}ms", entry.time, e);
+        }
+    }
+
+    // the recorded player's client drew them between where they were last tick and where they are now, so a tick
+    // ahead, interpolated between ticks, lands on the replay's present; the vanilla glide trails by several ticks
+    private void move(long elapsed) {
+        int from = movesUpTo(elapsed), to = movesUpTo(elapsed + 50);
+        if (to == 0) return; // no move recorded yet
+        Move a = moves.get(to - 1);
+        Move m = a;
+        if (to < moves.size() && !moves.get(to).snap) {
+            Move b = moves.get(to);
+            double f = (double) (elapsed + 50 - a.time) / (b.time - a.time);
+            m = new Move(0, a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f,
+                    (float) (a.yaw + (b.yaw - a.yaw) * f), (float) (a.pitch + (b.pitch - a.pitch) * f), false);
+        }
+        for (int i = from; i < to; i++) {
+            // a teleport or a ride: there in no time at all, as the recorder's client set it down
+            if (moves.get(i).snap) puppet.setLocationAndAngles(m.x, m.y, m.z, m.yaw, m.pitch);
+        }
+        // reached within this tick; on a mount, the mount puts it back where it sits
+        puppet.setPositionAndRotation2(m.x, m.y, m.z, m.yaw, m.pitch, 1, false);
+    }
+
+    // how many moves were sent by then
+    private int movesUpTo(long time) {
+        int lo = 0, hi = moves.size();
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (moves.get(mid).time <= time) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // every move packet, with what it leaves out carried forward: a standing player sends position once a second
+    private static List<Move> moves(List<RecordingFile.Entry> entries) {
+        List<Move> moves = new ArrayList<>();
+        Move last = null;
+        boolean snap = true;
+        int self = Integer.MIN_VALUE;
+        for (RecordingFile.Entry entry : entries) {
+            if (entry.direction == RecordingFile.INPUT) continue;
+            int id = entry.data[0];
+            try {
+                if (entry.direction != RecordingFile.SERVERBOUND) {
+                    if (id == 0x01) {
+                        self = ((S01PacketJoinGame) decode(entry)).getEntityId();
+                    } else if (id == 0x08) {
+                        // ponytail: relative flags ignored; 1.8 servers teleport absolutely
+                        S08PacketPlayerPosLook pos = (S08PacketPlayerPosLook) decode(entry);
+                        last = new Move(entry.time, pos.getX(), pos.getY(), pos.getZ(), pos.getYaw(), pos.getPitch(), true);
+                        snap = true;
+                    } else if (id == 0x1B) {
+                        S1BPacketEntityAttach attach = (S1BPacketEntityAttach) decode(entry);
+                        if (attach.getLeash() == 0 && attach.getEntityId() == self) snap = true;
+                    }
+                } else if (id >= 0x03 && id <= 0x06 && last != null) {
+                    C03PacketPlayer move = (C03PacketPlayer) decode(entry);
+                    last = new Move(entry.time,
+                            move.isMoving() ? move.getPositionX() : last.x,
+                            move.isMoving() ? move.getPositionY() : last.y,
+                            move.isMoving() ? move.getPositionZ() : last.z,
+                            move.getRotating() ? move.getYaw() : last.yaw,
+                            move.getRotating() ? move.getPitch() : last.pitch, snap);
+                    moves.add(last);
+                    snap = false;
+                }
+            } catch (Exception e) {
+                log.warn("Skipping a packet at {}ms", entry.time, e);
+            }
+        }
+        return moves;
+    }
+
+    private static final class Move {
+
+        final long time;
+        final double x, y, z;
+        final float yaw, pitch;
+        final boolean snap; // a teleport or a ride came before it: jump to it, do not glide
+
+        Move(long time, double x, double y, double z, float yaw, float pitch, boolean snap) {
+            this.time = time;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.yaw = yaw;
+            this.pitch = pitch;
+            this.snap = snap;
         }
     }
 
@@ -539,6 +618,7 @@ public final class Replay {
         public void onLivingUpdate() {
             double x = posX, y = posY, z = posZ;
             super.onLivingUpdate();
+            rotationYawHead = rotationYaw; // a player's head is where they look
             prevArmPitch = armPitch;
             prevArmYaw = armYaw;
             armPitch += (rotationPitch - armPitch) * 0.5F;
