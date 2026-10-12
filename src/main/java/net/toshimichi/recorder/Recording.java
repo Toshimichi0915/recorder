@@ -262,6 +262,8 @@ public final class Recording {
                 world.getGameRules().getBoolean("doDaylightCycle")));
 
         for (Chunk chunk : ((AccessorChunkProviderClient) world.getChunkProvider()).getChunkListing()) {
+            // loadChunk never drops the chunk a resent full chunk replaces, so the listing piles up stale copies
+            if (world.getChunkFromChunkCoords(chunk.xPosition, chunk.zPosition) != chunk) continue;
             packets.add(new S21PacketChunkData(chunk, true, 0xFFFF));
         }
 
