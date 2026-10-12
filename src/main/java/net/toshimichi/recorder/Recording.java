@@ -138,10 +138,17 @@ public final class Recording {
 
         DataOutputStream stream = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)));
         RecordingFile.writeHeader(stream, start, profile(mc));
-        // the world state the server sent before we started listening, so a replay has something to show
-        for (Packet<?> packet : snapshot(mc)) RecordingFile.writeEntry(stream, 0, RecordingFile.SNAPSHOT, serialize(EnumPacketDirection.CLIENTBOUND, packet));
+        // listen before the snapshot: what arrives while it is built is applied after it, so it must be recorded;
+        // record() waits on this lock until the snapshot is written, which keeps it in front
         channel = mc.getNetHandler().getNetworkManager().channel();
         out = stream;
+        try {
+            // the world state the server sent before we started listening, so a replay has something to show
+            for (Packet<?> packet : snapshot(mc)) RecordingFile.writeEntry(stream, 0, RecordingFile.SNAPSHOT, serialize(EnumPacketDirection.CLIENTBOUND, packet));
+        } catch (IOException | RuntimeException e) {
+            stop();
+            throw e;
+        }
     }
 
     public static synchronized void stop() {
