@@ -1,7 +1,6 @@
 package net.toshimichi.recorder.mixin;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiIngame;
 import net.minecraft.client.renderer.ActiveRenderInfo;
 import net.minecraft.client.renderer.EntityRenderer;
 import net.minecraft.entity.Entity;
@@ -20,6 +19,9 @@ public abstract class MixinEntityRenderer {
 
     @Unique
     private WorldSettings.GameType viewerGameType; // set only while a frame is drawn as the recorded player's
+
+    @Unique
+    private Entity overlayView; // the camera, set only while the overlay is drawn from the viewer's own player
 
     // particles face the camera, not wherever the viewer's own body is looking
     // ponytail: players only, the render info takes an EntityPlayer; a watched mob's particles face the viewer
@@ -49,18 +51,23 @@ public abstract class MixinEntityRenderer {
     }
 
     // the bars read the viewing entity, but the recorded health, food, experience and effects all land on the
-    // viewer's own player, as they did on the recorder's
+    // viewer's own player, as they did on the recorder's. Injected around the call rather than redirecting it,
+    // as Patcher's HUD caching redirects the same call and would win
     // ponytail: air and mount health read the viewer's own position and ride; forward them if missed
-    @Redirect(method = "updateCameraAndRender", at = @At(value = "INVOKE",
+    @Inject(method = "updateCameraAndRender", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/gui/GuiIngame;renderGameOverlay(F)V"))
-    private void recordedOverlay(GuiIngame gui, float partialTicks) {
+    private void recordedOverlay(float partialTicks, long nanoTime, CallbackInfo ci) {
+        if (viewerGameType == null) return;
         Minecraft mc = Minecraft.getMinecraft();
-        Entity view = mc.getRenderViewEntity();
-        if (viewerGameType != null) ((AccessorMinecraft) mc).setViewEntity(mc.thePlayer);
-        try {
-            gui.renderGameOverlay(partialTicks);
-        } finally {
-            ((AccessorMinecraft) mc).setViewEntity(view);
-        }
+        overlayView = mc.getRenderViewEntity();
+        ((AccessorMinecraft) mc).setViewEntity(mc.thePlayer);
+    }
+
+    @Inject(method = "updateCameraAndRender", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/gui/GuiIngame;renderGameOverlay(F)V", shift = At.Shift.AFTER))
+    private void viewerOverlay(float partialTicks, long nanoTime, CallbackInfo ci) {
+        if (overlayView == null) return;
+        ((AccessorMinecraft) Minecraft.getMinecraft()).setViewEntity(overlayView);
+        overlayView = null;
     }
 }
