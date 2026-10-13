@@ -329,11 +329,12 @@ public final class Recording {
         // after the chunks: this is what dismisses GuiDownloadTerrain on replay
         packets.add(new S08PacketPlayerPosLook(player.posX, player.posY, player.posZ, player.rotationYaw,
                 player.rotationPitch, EnumSet.noneOf(S08PacketPlayerPosLook.EnumFlags.class)));
-        // the skin layers shown; the server only echoes them back when they change
+        // the skin layers shown and the golden hearts; the server only sends them when they change
         int parts = 0;
         for (EnumPlayerModelParts part : mc.gameSettings.getModelParts()) parts |= part.getPartMask();
         DataWatcher skinParts = new DataWatcher(null);
         skinParts.addObject(10, (byte) parts);
+        skinParts.addObject(17, player.getAbsorptionAmount());
         packets.add(new S1CPacketEntityMetadata(player.getEntityId(), skinParts, true));
 
         for (Entity entity : world.loadedEntityList) {

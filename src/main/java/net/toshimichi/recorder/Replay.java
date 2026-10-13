@@ -293,12 +293,13 @@ public final class Replay {
             }
             if (packet instanceof S1CPacketEntityMetadata && ((S1CPacketEntityMetadata) packet).getEntityId() == mc.thePlayer.getEntityId()) {
                 // the recorded player's own metadata is the puppet's; only the flags (eating, burning...) and the
-                // skin layers, health would kill it off
+                // skin layers, health would kill it off. Absorption goes to the viewer, whose player the hearts read
                 List<DataWatcher.WatchableObject> objects = ((S1CPacketEntityMetadata) packet).func_149376_c();
                 // an empty update decodes as null, not an empty list
                 if (objects != null) for (DataWatcher.WatchableObject object : objects) {
                     if (object.getDataValueId() == 10) skinParts = (Byte) object.getObject();
                     if (object.getDataValueId() == 0 && puppet != null) puppet.getDataWatcher().updateObject(0, object.getObject());
+                    if (object.getDataValueId() == 17) mc.thePlayer.setAbsorptionAmount((Float) object.getObject());
                 }
                 if (puppet != null) puppet.getDataWatcher().updateObject(10, skinParts);
                 return;

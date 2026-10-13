@@ -86,7 +86,7 @@ border, scoreboard, the player's inventory, health and experience, Player Positi
 Look, then a spawn for every other entity in view, an Entity Teleport to the server's exact position for it (none for paintings), its equipment, head yaw, bed, attributes,
 potion effects and riding or leash links. Right after Player Position And Look comes an Entity
 Metadata for the player's own entity id holding only index 10, the skin layers (hat, jacket,
-sleeves, trousers, cape) the client had switched on. They all carry `time` 0 and are encoded exactly like real
+sleeves, trousers, cape) the client had switched on, and index 17, the absorption (golden hearts). They all carry `time` 0 and are encoded exactly like real
 packets so a replayer can feed them unchanged.
 
 They were never sent by the server. Analysis of server behaviour should skip direction 2.

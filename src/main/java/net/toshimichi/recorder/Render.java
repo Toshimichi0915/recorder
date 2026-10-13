@@ -8,6 +8,8 @@ import net.minecraft.client.settings.GameSettings;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.MathHelper;
+import net.minecraft.util.MovingObjectPosition;
+import net.minecraft.util.Vec3;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.TickEvent;
@@ -275,14 +277,25 @@ public final class Render {
         lookY += (ly - lookY) * k;
         lookZ += (lz - lookZ) * k;
         camSet = true;
-        double dx = lookX - camX, dy = lookY - camY, dz = lookZ - camZ;
+        // keep the fighters in sight: stop short of a wall or slope in between, as vanilla's third person does.
+        // Only for this frame, so the camera swings back out once past it
+        double ex = camX, ey = camY, ez = camZ;
+        Vec3 look = new Vec3(lookX, lookY, lookZ);
+        MovingObjectPosition wall = mc.theWorld.rayTraceBlocks(look, new Vec3(camX, camY, camZ), false, true, false);
+        if (wall != null && look.distanceTo(wall.hitVec) > 0.5) { // a look point inside a block blocks every ray
+            double f = (look.distanceTo(wall.hitVec) - 0.3) / look.distanceTo(new Vec3(camX, camY, camZ));
+            ex = lookX + (camX - lookX) * f;
+            ey = lookY + (camY - lookY) * f;
+            ez = lookZ + (camZ - lookZ) * f;
+        }
+        double dx = lookX - ex, dy = lookY - ey, dz = lookZ - ez;
         float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90;
         float pitch = (float) -Math.toDegrees(Math.atan2(dy, MathHelper.sqrt_double(dx * dx + dz * dz)));
-        double y = camY - viewer.getEyeHeight();
-        viewer.setPosition(camX, y, camZ);
-        viewer.prevPosX = viewer.lastTickPosX = camX;
+        double y = ey - viewer.getEyeHeight();
+        viewer.setPosition(ex, y, ez);
+        viewer.prevPosX = viewer.lastTickPosX = ex;
         viewer.prevPosY = viewer.lastTickPosY = y;
-        viewer.prevPosZ = viewer.lastTickPosZ = camZ;
+        viewer.prevPosZ = viewer.lastTickPosZ = ez;
         viewer.rotationYaw = viewer.prevRotationYaw = viewer.rotationYawHead = viewer.prevRotationYawHead = yaw;
         viewer.rotationPitch = viewer.prevRotationPitch = pitch;
         viewer.motionX = viewer.motionY = viewer.motionZ = 0;
