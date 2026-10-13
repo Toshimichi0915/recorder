@@ -7,6 +7,7 @@ import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.settings.GameSettings;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.MathHelper;
 import net.minecraft.util.MovingObjectPosition;
 import net.minecraft.util.Vec3;
@@ -16,6 +17,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.BufferUtils;
+import org.lwjgl.opengl.Display;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 import org.lwjgl.util.glu.GLU;
@@ -30,6 +32,7 @@ import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -42,12 +45,19 @@ import java.util.List;
  * name start_ms end_ms speed fp
  * name start_ms end_ms speed orbit angle_deg deg_per_s radius height
  * name start_ms end_ms speed shoulder side height
+ * wear legs 6700                   the recorded player's armour slot (feet, legs, chest, head) wears a copy of that
+ *                                  entity's whenever it shows empty: a client that lost track of what it wore (a ghost
+ *                                  item) recorded a bare slot
  * </pre>
+ * The path may not contain spaces. Third person cameras stop short of walls, an orbit swings round them, and a target
+ * more than 16 blocks off (killed and back at spawn) leaves the recorded player framed alone, angles counted from
+ * where they face.
  */
 public final class Render {
 
     private static final Logger log = LogManager.getLogger();
     private static final int WIDTH = 1920, HEIGHT = 1080, FPS = 60, WARMUP = 45;
+    private static final List<String> ARMOR = Arrays.asList("feet", "legs", "chest", "head"); // armorInventory order
     private static Render current;
 
     private final Minecraft mc = Minecraft.getMinecraft();
@@ -55,6 +65,8 @@ public final class Render {
     private File recording;
     private int target;
     private final List<String[]> shots = new ArrayList<>();
+    private final List<String[]> wear = new ArrayList<>();
+    private final ItemStack[] worn = new ItemStack[4]; // the first copy seen of each piece lent
     private int shot = -1;
     private int warmup;
     private int frame;
@@ -71,6 +83,7 @@ public final class Render {
     private float[] targetOnScreen, selfOnScreen;
     private double camX, camY, camZ, lookX, lookY, lookZ; // smoothed
     private boolean camSet;
+    private double dodge; // radians the orbit has swung off its angle to see past walls
 
     private Render(File shotList) throws IOException {
         dir = shotList.getParentFile();
@@ -79,6 +92,7 @@ public final class Render {
             if (w[0].isEmpty() || w[0].startsWith("#")) continue;
             if (w[0].equals("file")) recording = new File(w[1]);
             else if (w[0].equals("target")) target = Integer.parseInt(w[1]);
+            else if (w[0].equals("wear")) wear.add(w);
             else shots.add(w);
         }
     }
@@ -132,6 +146,7 @@ public final class Render {
             GameSettings s = mc.gameSettings;
             s.pauseOnLostFocus = false;
             s.enableVsync = false;
+            Display.setVSyncEnabled(false); // the option alone is only read at startup; a hidden window's vsync never returns
             s.limitFramerate = (int) GameSettings.Options.FRAMERATE_LIMIT.getValueMax();
             s.chatVisibility = EntityPlayer.EnumChatVisibility.HIDDEN;
             s.setSoundLevel(SoundCategory.MASTER, 0);
@@ -167,15 +182,16 @@ public final class Render {
         warmup = WARMUP;
         frame = 0;
         camSet = false;
+        dodge = 0;
         mc.gameSettings.hideGUI = !s[4].equals("fp");
         String name = s[0];
         ffmpeg = new ProcessBuilder("ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgra",
-                "-s", mc.displayWidth + "x" + mc.displayHeight, "-r", String.valueOf(FPS), "-i", "-",
+                "-s", WIDTH + "x" + HEIGHT, "-r", String.valueOf(FPS), "-i", "-",
                 "-vf", "vflip", "-c:v", "libx264", "-preset", "fast", "-crf", "12", "-pix_fmt", "yuv420p",
                 new File(dir, name + ".mp4").getPath()).inheritIO().redirectInput(ProcessBuilder.Redirect.PIPE).start();
         pipe = Channels.newChannel(ffmpeg.getOutputStream());
         meta = new PrintWriter(new File(dir, name + ".jsonl"), "UTF-8");
-        pixels = BufferUtils.createByteBuffer(mc.displayWidth * mc.displayHeight * 4);
+        pixels = BufferUtils.createByteBuffer(WIDTH * HEIGHT * 4);
         log.info("Rendering shot {}", name);
     }
 
@@ -192,7 +208,7 @@ public final class Render {
     private void capture(Replay replay) throws IOException {
         pixels.clear();
         GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, 1);
-        GL11.glReadPixels(0, 0, mc.displayWidth, mc.displayHeight, GL12.GL_BGRA, GL11.GL_UNSIGNED_BYTE, pixels);
+        GL11.glReadPixels(0, 0, WIDTH, HEIGHT, GL12.GL_BGRA, GL11.GL_UNSIGNED_BYTE, pixels);
         while (pixels.hasRemaining()) pipe.write(pixels);
         Entity t = mc.theWorld.getEntityByID(target);
         meta.printf("{\"f\":%d,\"t\":%d,\"o\":%s,\"p\":%s,\"hp\":%.2f,\"ohurt\":%d}%n", frame++, replay.elapsed(),
@@ -229,12 +245,28 @@ public final class Render {
         out.clear();
         if (!GLU.gluProject((float) x, (float) y, (float) z, modelview, projection, viewport, out)) return null;
         if (out.get(2) < 0 || out.get(2) > 1) return null; // behind the camera
-        return new float[]{out.get(0), mc.displayHeight - out.get(1)};
+        return new float[]{out.get(0), HEIGHT - out.get(1)};
+    }
+
+    // the puppet shares the viewer's armour, so this dresses both it and the first person hud
+    private void dress() {
+        ItemStack[] armor = mc.thePlayer.inventory.armorInventory;
+        for (String[] w : wear) {
+            int slot = ARMOR.indexOf(w[1]);
+            Entity from = mc.theWorld.getEntityByID(Integer.parseInt(w[2]));
+            if (worn[slot] == null && from instanceof EntityPlayer && ((EntityPlayer) from).getCurrentArmor(slot) != null) {
+                worn[slot] = ((EntityPlayer) from).getCurrentArmor(slot).copy();
+            }
+            if (armor[slot] == null && worn[slot] != null) armor[slot] = worn[slot].copy();
+        }
     }
 
     // place the viewer for this frame; prev and last tick copies too, so nothing interpolates it elsewhere
     private void camera(float pt) {
         if (!active() || mc.theWorld == null || Replay.recorded() == null) return;
+        // a grabbed mouse turns the viewer between here and the drawing: let it go
+        if (mc.inGameHasFocus) mc.setIngameNotInFocus();
+        dress();
         String[] s = shots.get(shot);
         Replay.Puppet self = Replay.recorded();
         if (s[4].equals("fp")) {
@@ -244,22 +276,29 @@ public final class Render {
         EntityPlayerSP viewer = mc.thePlayer;
         if (mc.getRenderViewEntity() != viewer) mc.setRenderViewEntity(viewer);
         Entity other = mc.theWorld.getEntityByID(target);
+        if (other != null && other.getDistanceToEntity(self) > 16) other = null; // killed and back at spawn, or fled
         double ax = lerp(self.lastTickPosX, self.posX, pt), ay = lerp(self.lastTickPosY, self.posY, pt), az = lerp(self.lastTickPosZ, self.posZ, pt);
-        double bx = other != null ? lerp(other.lastTickPosX, other.posX, pt) : ax + 3;
+        double bx = other != null ? lerp(other.lastTickPosX, other.posX, pt) : ax;
         double by = other != null ? lerp(other.lastTickPosY, other.posY, pt) : ay;
         double bz = other != null ? lerp(other.lastTickPosZ, other.posZ, pt) : az;
-        double line = Math.atan2(bz - az, bx - ax);
+        // alone, angles count from where the recorded player faces
+        double line = other != null ? Math.atan2(bz - az, bx - ax) : Math.toRadians(self.rotationYaw + 90);
         double seconds = (double) frame / FPS;
         double cx, cy, cz, lx, ly, lz;
         if (s[4].equals("orbit")) {
-            double angle = Math.toRadians(Double.parseDouble(s[5]) + Double.parseDouble(s[6]) * seconds);
-            double radius = Double.parseDouble(s[7]);
+            double angle = line + Math.toRadians(Double.parseDouble(s[5]) + Double.parseDouble(s[6]) * seconds);
+            double radius = Double.parseDouble(s[7]), height = Double.parseDouble(s[8]);
             lx = (ax + bx) / 2;
             ly = (ay + by) / 2 + 1.1;
             lz = (az + bz) / 2;
-            cx = lx + Math.cos(line + angle) * radius;
-            cy = ly + Double.parseDouble(s[8]);
-            cz = lz + Math.sin(line + angle) * radius;
+            // a wall in the way: swing round to the nearest clear side, and stay there or it flaps between the two
+            double from = dodge;
+            for (int i = 1; i <= 18 && blocked(lx, ly, lz, angle + dodge, radius, height); i++) {
+                dodge = from + Math.toRadians(20) * (i % 2 == 1 ? (i + 1) / 2 : -(i / 2));
+            }
+            cx = lx + Math.cos(angle + dodge) * radius;
+            cy = ly + height;
+            cz = lz + Math.sin(angle + dodge) * radius;
         } else { // shoulder
             double side = Double.parseDouble(s[5]);
             lx = bx;
@@ -299,6 +338,11 @@ public final class Render {
         viewer.rotationYaw = viewer.prevRotationYaw = viewer.rotationYawHead = viewer.prevRotationYawHead = yaw;
         viewer.rotationPitch = viewer.prevRotationPitch = pitch;
         viewer.motionX = viewer.motionY = viewer.motionZ = 0;
+    }
+
+    private boolean blocked(double lx, double ly, double lz, double angle, double radius, double height) {
+        return mc.theWorld.rayTraceBlocks(new Vec3(lx, ly, lz),
+                new Vec3(lx + Math.cos(angle) * radius, ly + height, lz + Math.sin(angle) * radius), false, true, false) != null;
     }
 
     private static double lerp(double a, double b, double f) {

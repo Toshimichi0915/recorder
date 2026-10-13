@@ -3,9 +3,12 @@ package net.toshimichi.recorder.mixin;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.audio.SoundHandler;
 import net.minecraft.entity.player.EntityPlayer;
+import net.toshimichi.recorder.Render;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Minecraft.class)
 public abstract class MixinMinecraft {
@@ -17,5 +20,11 @@ public abstract class MixinMinecraft {
     private void listenFromView(SoundHandler handler, EntityPlayer player, float partialTicks) {
         Minecraft mc = (Minecraft) (Object) this;
         handler.setListener(mc.getRenderViewEntity() instanceof EntityPlayer ? (EntityPlayer) mc.getRenderViewEntity() : player, partialTicks);
+    }
+
+    // offline rendering draws at its own frame size; following a window manager's resizes would fight it every frame
+    @Inject(method = "checkWindowResize", at = @At("HEAD"), cancellable = true)
+    private void keepFrameSize(CallbackInfo ci) {
+        if (Render.active()) ci.cancel();
     }
 }
