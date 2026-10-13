@@ -16,6 +16,8 @@ public class Recorder {
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
         MinecraftForge.EVENT_BUS.register(this);
+        Render.init();
+        if (Render.current() != null) MinecraftForge.EVENT_BUS.register(Render.current());
     }
 
     @SubscribeEvent

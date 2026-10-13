@@ -112,7 +112,7 @@ public final class Replay {
     public static void start(File file, GuiScreen parent) throws IOException {
         current = new Replay(parent, RecordingFile.readAll(file));
         current.connect();
-        current.resumedAt = System.currentTimeMillis();
+        current.resumedAt = Render.clock();
         current.tick();
     }
 
@@ -138,7 +138,7 @@ public final class Replay {
 
     // the wall clock keeps running past the last entry; the replay does not
     public long elapsed() {
-        return Math.min(duration(), paused ? base : base + System.currentTimeMillis() - resumedAt);
+        return Math.min(duration(), paused ? base : base + Render.clock() - resumedAt);
     }
 
     public long duration() {
@@ -170,7 +170,7 @@ public final class Replay {
 
     public void togglePause() {
         base = elapsed();
-        resumedAt = System.currentTimeMillis();
+        resumedAt = Render.clock();
         paused = !paused;
     }
 
@@ -183,7 +183,7 @@ public final class Replay {
             connect();
         }
         base = millis;
-        resumedAt = System.currentTimeMillis();
+        resumedAt = Render.clock();
         tick();
         // the new world puts the viewer back at the snapshot; keep them where they were, unless that was another dimension
         EntityPlayerSP player = mc.thePlayer;

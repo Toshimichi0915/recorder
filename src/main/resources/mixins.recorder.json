@@ -21,6 +21,7 @@
     "MixinMessageDeserializer",
     "MixinMessageSerializer",
     "MixinNetworkManager",
-    "MixinRendererLivingEntity"
+    "MixinRendererLivingEntity",
+    "MixinTimer"
   ]
 }

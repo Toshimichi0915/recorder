@@ -69,6 +69,7 @@ import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.EnumChatFormatting;
 import net.minecraft.util.IChatComponent;
 import net.minecraft.util.MathHelper;
+import net.minecraft.util.Util;
 import net.minecraft.world.WorldSavedData;
 import net.minecraft.world.WorldSettings;
 import net.minecraft.world.chunk.Chunk;
@@ -76,6 +77,7 @@ import net.minecraft.world.storage.MapData;
 import net.minecraftforge.fml.common.network.internal.FMLProxyPacket;
 import net.toshimichi.recorder.mixin.AccessorChunkProviderClient;
 import net.toshimichi.recorder.mixin.AccessorGuiPlayerTabOverlay;
+import net.toshimichi.recorder.mixin.AccessorMinecraft;
 import net.toshimichi.recorder.mixin.AccessorMapStorage;
 import net.toshimichi.recorder.mixin.AccessorS38PacketPlayerListItem;
 import net.toshimichi.recorder.mixin.InvokerEntityTrackerEntry;
@@ -92,6 +94,8 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.FutureTask;
 
 /** Writes the live connection to disk. record() is called from the netty thread, the rest from the client thread. */
 public final class Recording {
@@ -137,12 +141,18 @@ public final class Recording {
         start = System.currentTimeMillis();
 
         DataOutputStream stream = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)));
-        RecordingFile.writeHeader(stream, start, profile(mc));
-        // listen before the snapshot: what arrives while it is built is applied after it, so it must be recorded;
-        // record() waits on this lock until the snapshot is written, which keeps it in front
+        // listen first: whatever arrives from here on is applied after the snapshot, so it must be recorded;
+        // record() waits on this lock until the header and snapshot are written, which keeps them in front
         channel = mc.getNetHandler().getNetworkManager().channel();
         out = stream;
         try {
+            // and what arrived before is applied before it, or it is in neither
+            Queue<FutureTask<?>> tasks = ((AccessorMinecraft) mc).getScheduledTasks();
+            synchronized (tasks) {
+                while (!tasks.isEmpty()) Util.runTask(tasks.poll(), log);
+            }
+            // profile() may block on Mojang's session server for a while
+            RecordingFile.writeHeader(stream, start, profile(mc));
             // the world state the server sent before we started listening, so a replay has something to show
             for (Packet<?> packet : snapshot(mc)) RecordingFile.writeEntry(stream, 0, RecordingFile.SNAPSHOT, serialize(EnumPacketDirection.CLIENTBOUND, packet));
         } catch (IOException | RuntimeException e) {
